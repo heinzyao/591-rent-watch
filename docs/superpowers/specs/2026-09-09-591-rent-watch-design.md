@@ -36,6 +36,11 @@
 
 不維護任何縣市／鄉鎮代碼對照表 —— 591 自己的網址就是最完整的參數表達方式。
 
+## 相依套件
+
+`requests`、`beautifulsoup4`、`lxml`、`google-cloud-storage`。皆為 `distiller` 已在使用的套件。
+設定檔以標準庫 `tomllib` 讀取（Python 3.11+），不另加 TOML 套件。
+
 ## 專案結構
 
 ```
@@ -68,7 +73,7 @@ fetch(search_url: str, pages: int) -> list[str]
     # 純 I/O。回傳每頁的 HTML 字串。
 
 parse(html: str) -> list[Listing]
-    # 純函式。切 div.item[data-id] 並抽欄位。
+    # 純函式。以 BeautifulSoup(html, "lxml") 選取 div.item[data-id] 並抽欄位。
     # 唯一會因 591 改版而損壞的元件，故隔離並以 fixture 測試。
 
 diff(listings: list[Listing], seen: set[str]) -> list[Listing]
@@ -120,7 +125,7 @@ https://rent.591.com.tw/21822928
 
 以下三點是刻意保留的複雜度，不得簡化：
 
-1. **解析結果為 0 筆 → 視為失敗**。不更新 `seen.json`、發送告警訊息、`exit 1`。
+1. **解析結果為 0 筆 → 視為失敗**。不更新 `seen.json`、以同一個 LINE channel broadcast 一則告警（「591 解析失敗，可能已改版」）、`exit 1`。
    若不擋這條，591 改版當天狀態會被清空，隔天會推播出整批重複物件。
 2. **LINE 推播失敗 → 不更新 `seen.json`**，讓下次執行重推，避免漏掉物件。
 3. **`seen.json` 只保留最近 1000 筆 id**，避免檔案無限膨脹。
@@ -129,7 +134,7 @@ https://rent.591.com.tw/21822928
 
 ## 狀態儲存
 
-GCS 單一 blob：`gs://<bucket>/591-rent-watch/seen.json`，內容為 `{"ids": ["21901752", ...]}`。
+GCS 單一 blob：`gs://$GCS_BUCKET/591-rent-watch/seen.json`（bucket 名由環境變數 `GCS_BUCKET` 提供，部署時設定），內容為 `{"ids": ["21901752", ...]}`。
 
 一次讀、一次寫，無 schema、無 index、無查詢需求。不使用 Firestore —— 本案只需要「一堆 id」，用不到文件資料庫的任何能力。
 
