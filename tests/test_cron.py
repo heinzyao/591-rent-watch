@@ -82,6 +82,7 @@ def test_all_groups_empty_is_treated_as_parse_failure(fetch_returns):
     messages, failed = main.run_daily(subs)
     assert failed is True
     assert subs["subs"][0]["seen"] == ["old"]   # 失敗時不得更動 seen
+    assert subs["subs"][0]["last_count"] == 0, "失敗時的就地修改不得落地——這裡鎖住現況，呼叫端必須不寫回"
 
 
 def test_no_subscriptions_is_not_a_failure():
@@ -138,3 +139,26 @@ def test_cron_saves_only_after_successful_broadcast(monkeypatch):
 
     response = main.app.test_client().post("/cron", headers={"X-Cron-Key": "secret"})
     assert response.status_code == 500
+
+
+def test_all_groups_failing_still_notifies_the_user(fetch_returns):
+    # 591 整站打不通時，使用者必須收到訊息，不能跟「今天沒新物件」無法區分
+    fetch_returns({"甲": RuntimeError("timeout"), "乙": RuntimeError("timeout")})
+    subs = {"subs": [sub("甲", ["old"]), sub("乙", ["old"])]}
+
+    messages, failed = main.run_daily(subs)
+
+    assert messages, "全部抓取失敗卻沒有任何訊息，使用者無從得知排程壞了"
+    assert "甲" in messages[-1] and "乙" in messages[-1]
+
+
+def test_failure_note_survives_when_no_group_has_new_listings(fetch_returns):
+    # 一組失敗、其他組今天沒新物件（最常見的情況）：失敗通知不能被丟掉
+    fetch_returns({"甲": [make("1")], "乙": RuntimeError("boom")})
+    subs = {"subs": [sub("甲", ["1"]), sub("乙", ["old"])]}
+
+    messages, failed = main.run_daily(subs)
+
+    assert failed is False
+    assert messages, "甲沒有新物件不代表乙的失敗可以不通知"
+    assert "乙" in messages[-1]

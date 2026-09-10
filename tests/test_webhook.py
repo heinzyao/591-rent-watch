@@ -133,3 +133,35 @@ def test_webhook_accepts_valid_signature(monkeypatch):
 
 def test_health_check():
     assert main.app.test_client().get("/").status_code == 200
+
+
+def test_webhook_returns_200_even_when_handling_an_event_raises(monkeypatch):
+    # 個別事件失敗不能拖垮整批：LINE 收不到 200 會重送整批事件
+    monkeypatch.setattr(main, "verify_signature", lambda body, sig: True)
+    monkeypatch.setattr(main, "load_subs", lambda: {"subs": []})
+
+    def boom(command, subs):
+        raise RuntimeError("處理指令時炸了")
+
+    monkeypatch.setattr(main, "handle_command", boom)
+    monkeypatch.setattr(main, "reply", lambda token, text: None)
+
+    response = main.app.test_client().post(
+        "/webhook",
+        json={"events": [{"type": "message", "message": {"type": "text", "text": "清單"}, "replyToken": "t"}]},
+        headers={"X-Line-Signature": "ok"},
+    )
+    assert response.status_code == 200
+
+
+def test_add_reports_failure_when_fetch_raises_unexpectedly(monkeypatch):
+    def boom(url, pages=3):
+        raise RuntimeError("網路炸了")
+
+    monkeypatch.setattr(main, "fetch", boom)
+    subs = {"subs": []}
+    text, changed = main.handle_command(AddSub(name="測試", url=URL), subs)
+
+    assert changed is False
+    assert subs["subs"] == [], "抓取失敗不得留下半殘的訂閱"
+    assert "失敗" in text

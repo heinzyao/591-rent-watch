@@ -9,7 +9,7 @@ from flask import Flask, request
 
 from commands import AddSub, Command, DeleteSub, Help, ListSubs, parse_command
 from notify import broadcast, broadcast_all, format_new_listings, reply, verify_signature
-from rent591 import InvalidSearchURL, diff, fetch
+from rent591 import PAGE_SIZE, InvalidSearchURL, diff, fetch
 from store import load_subs, save_subs
 
 app = Flask(__name__)
@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 PAGES = int(os.environ.get("PAGES", "3"))
-PAGE_CAP = PAGES * 30
+PAGE_CAP = PAGES * PAGE_SIZE
 
 HELP_TEXT = (
     "把 591 搜尋頁的網址貼給我就會開始監控，每天早上推播新上架的物件。\n\n"
@@ -39,6 +39,8 @@ def handle_command(command: Command, subs: dict) -> tuple[str, bool]:
             listings = fetch(command.url, pages=PAGES)
         except InvalidSearchURL:
             return "無法辨識這個網址，請從 rent.591.com.tw 的搜尋結果頁複製。", False
+        # ponytail: 所有抓取失敗都回同一句話。log.exception 已保留完整 traceback 供排查；
+        # 若日後需要區分逾時／解析錯誤／程式錯誤再拆開。
         except Exception:
             log.exception("新增訂閱時抓取失敗")
             return "抓取失敗，請稍後再試一次。", False
@@ -94,13 +96,14 @@ def webhook() -> tuple[str, int]:
     for event in events.get("events", []):
         if event.get("type") != "message" or event["message"].get("type") != "text":
             continue
-        command = parse_command(event["message"]["text"])
-        text, changed = handle_command(command, subs)
-        dirty = dirty or changed
         try:
+            command = parse_command(event["message"]["text"])
+            text, changed = handle_command(command, subs)
+            dirty = dirty or changed
             reply(event["replyToken"], text)
         except Exception:
-            log.exception("回覆失敗")
+            log.exception("處理事件失敗")
+            continue
 
     if dirty:
         save_subs(subs)
@@ -134,14 +137,19 @@ def run_daily(subs: dict) -> tuple[list[str], bool]:
         sub["last_count"] = len(listings)
 
     # 所有成功抓取的訂閱都回 0 筆 —— 正常情況下不可能同時歸零，判定為 591 改版。
-    # 只有一組訂閱時這個判斷會把「條件真的沒物件」誤報為改版，但誤報方向是安全的
-    # （只是多發一則告警，不會動到 seen）。
+    # ponytail: 只有一組訂閱時，該組合法的 0 筆會被誤判為改版。誤報方向是安全的
+    # （只多發一則告警，不會動到 seen）。若要消除誤報，改成比對該訂閱近幾次
+    # last_count 的歷史趨勢，而非只看單次結果。
     if fetched_counts and not any(fetched_counts):
         return [], True
 
     messages = format_new_listings(groups)
-    if errors and messages:
-        messages[-1] += f"\n\n⚠️ 以下條件本次抓取失敗，將於明日重試：{'、'.join(errors)}"
+    if errors:
+        note = f"⚠️ 以下條件本次抓取失敗，將於明日重試：{'、'.join(errors)}"
+        if messages:
+            messages[-1] += f"\n\n{note}"
+        else:
+            messages = [note]
 
     return messages, False
 
