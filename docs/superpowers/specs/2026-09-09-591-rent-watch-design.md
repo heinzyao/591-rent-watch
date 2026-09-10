@@ -74,6 +74,17 @@
 若抓到 **0 筆**，仍然新增，但回覆提醒「目前 0 筆，條件可能過嚴或網址有誤」。
 若抓滿 `pages × 30` 筆（預設 90），回覆提醒「條件較寬，建議收緊」。
 
+## TLS 相容性（實作階段發現）
+
+591 的憑證鏈不符 RFC 5280 嚴格要求：中間憑證 `TWCA Secure SSL Certification Authority`
+缺少 Subject Key Identifier。Python 3.13+ 搭配 OpenSSL 3.5+ 預設啟用 `ssl.VERIFY_X509_STRICT`，
+會直接拒絕連線（`CERTIFICATE_VERIFY_FAILED: Missing Subject Key Identifier`）。
+已在部署目標映像 `python:3.13-slim`（OpenSSL 3.5.7）中確認，非本機環境問題。
+
+`rent591._ssl_context()` 只清除 `VERIFY_X509_STRICT` 這一項格式檢查，
+信任鏈、主機名與有效期驗證全部保留 —— 與 `verify=False` 有本質差異。
+測試 `test_ssl_context_keeps_verification_but_drops_strict_format_check` 鎖住這個不變條件。
+
 ## 相依套件
 
 `flask`、`gunicorn`、`requests`、`beautifulsoup4`、`lxml`、`google-cloud-storage`。
