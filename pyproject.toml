@@ -1,0 +1,19 @@
+[project]
+name = "rent591-watch"
+version = "0.1.0"
+description = "591 租屋網每日監控與 LINE 通知"
+requires-python = ">=3.13"
+dependencies = [
+    "flask>=3.0",
+    "gunicorn>=23.0",
+    "requests>=2.32",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "google-cloud-storage>=3.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
