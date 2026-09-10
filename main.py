@@ -107,3 +107,62 @@ def webhook() -> tuple[str, int]:
 
     # LINE 只要收到 200 就不會重送；個別事件的失敗已記在 log 裡
     return "ok", 200
+
+
+def run_daily(subs: dict) -> tuple[list[str], bool]:
+    """跑完所有訂閱，回傳 (要推播的訊息, 是否判定為解析失敗)。
+
+    判定為失敗時呼叫端不得寫回 subs —— 若 591 改版導致解析全空而我們照樣
+    更新了 seen，隔天修好時會湧出一整批重複推播。
+    """
+    groups: list[tuple[str, list]] = []
+    errors: list[str] = []
+    fetched_counts: list[int] = []
+
+    for sub in subs["subs"]:
+        try:
+            listings = fetch(sub["url"], pages=PAGES)
+        except Exception:
+            log.exception("訂閱「%s」抓取失敗", sub["name"])
+            errors.append(sub["name"])
+            continue
+
+        seen = set(sub["seen"])
+        fetched_counts.append(len(listings))
+        groups.append((sub["name"], diff(listings, seen)))
+        sub["seen"] = sub["seen"] + [item.id for item in listings if item.id not in seen]
+        sub["last_count"] = len(listings)
+
+    # 所有成功抓取的訂閱都回 0 筆 —— 正常情況下不可能同時歸零，判定為 591 改版。
+    # 只有一組訂閱時這個判斷會把「條件真的沒物件」誤報為改版，但誤報方向是安全的
+    # （只是多發一則告警，不會動到 seen）。
+    if fetched_counts and not any(fetched_counts):
+        return [], True
+
+    messages = format_new_listings(groups)
+    if errors and messages:
+        messages[-1] += f"\n\n⚠️ 以下條件本次抓取失敗，將於明日重試：{'、'.join(errors)}"
+
+    return messages, False
+
+
+@app.post("/cron")
+def cron() -> tuple[str, int]:
+    # ponytail: 共享密鑰擋 /cron。Service 必須公開（LINE webhook 要打得到），
+    # 所以無法靠 Cloud Run IAM 保護。若日後有多個排程來源，改用 Cloud Scheduler
+    # OIDC + Google ID token 驗證。
+    if request.headers.get("X-Cron-Key") != os.environ["CRON_KEY"]:
+        return "forbidden", 403
+
+    subs = load_subs()
+    messages, failed = run_daily(subs)
+
+    if failed:
+        broadcast("⚠️ 591 解析失敗，所有條件都抓不到物件，網站可能已改版。")
+        return "parse failure", 500
+
+    if messages:
+        broadcast_all(messages)      # 失敗會往外拋，下面的 save_subs 就不會執行
+
+    save_subs(subs)
+    return "ok", 200
