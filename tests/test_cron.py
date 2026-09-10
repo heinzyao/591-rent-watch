@@ -141,6 +141,20 @@ def test_cron_saves_only_after_successful_broadcast(monkeypatch):
     assert response.status_code == 500
 
 
+def test_cron_saves_after_successful_broadcast(monkeypatch):
+    monkeypatch.setenv("CRON_KEY", "secret")
+    monkeypatch.setattr(main, "load_subs", lambda: {"subs": []})
+    monkeypatch.setattr(main, "run_daily", lambda subs: (["訊息"], False))
+    monkeypatch.setattr(main, "broadcast_all", lambda texts: None)
+    saved = []
+    monkeypatch.setattr(main, "save_subs", saved.append)
+
+    response = main.app.test_client().post("/cron", headers={"X-Cron-Key": "secret"})
+
+    assert response.status_code == 200
+    assert len(saved) == 1, "推播成功後必須寫回，否則隔天會重推同一批物件"
+
+
 def test_all_groups_failing_still_notifies_the_user(fetch_returns):
     # 591 整站打不通時，使用者必須收到訊息，不能跟「今天沒新物件」無法區分
     fetch_returns({"甲": RuntimeError("timeout"), "乙": RuntimeError("timeout")})

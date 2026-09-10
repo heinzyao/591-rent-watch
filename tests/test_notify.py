@@ -41,6 +41,13 @@ def test_verify_signature_rejects_garbage(monkeypatch):
     assert verify_signature(b"{}", "not-base64!!") is False
 
 
+def test_verify_signature_rejects_non_ascii_header(monkeypatch):
+    # hmac.compare_digest 對非 ASCII 的 str 會拋 TypeError，
+    # 而這個 header 來自公開端點，任何人都能送
+    monkeypatch.setenv("LINE_CHANNEL_SECRET", "topsecret")
+    assert verify_signature(b"{}", "café") is False
+
+
 # ---- 訊息格式化 ----
 
 def test_format_includes_total_count_and_group_name():
@@ -58,6 +65,12 @@ def test_format_includes_listing_details_and_url():
     assert "獨立套房" in text
     assert "中山區-林森北路" in text
     assert "https://rent.591.com.tw/21901752" in text
+
+
+def test_format_includes_title_and_floor():
+    messages = format_new_listings([("測試", [make("1")])])
+    assert "測試物件" in messages[0]
+    assert "3F/9F" in messages[0]
 
 
 def test_format_omits_metro_line_when_absent():

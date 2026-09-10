@@ -22,12 +22,13 @@ def verify_signature(body: bytes, signature: str | None) -> bool:
         return False
     secret = os.environ["LINE_CHANNEL_SECRET"].encode()
     expected = base64.b64encode(hmac.new(secret, body, hashlib.sha256).digest()).decode()
-    return hmac.compare_digest(expected, signature)
+    return hmac.compare_digest(expected.encode(), signature.encode("utf-8", "replace"))
 
 
 def _format_listing(listing: Listing) -> str:
     lines = [
-        f"{listing.price} 元/月｜{listing.size}｜{listing.kind}",
+        listing.title[:40],
+        f"{listing.price} 元/月｜{listing.size}｜{listing.kind}｜{listing.floor}",
         listing.address if listing.metro is None else f"{listing.address}｜{listing.metro}",
         listing.url,
     ]

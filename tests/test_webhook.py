@@ -61,6 +61,17 @@ def test_add_warns_when_results_hit_page_cap(fake_fetch):
     assert "收緊" in text
 
 
+def test_add_rejects_duplicate_url(monkeypatch):
+    monkeypatch.setattr(main, "fetch", lambda url, pages=3: pytest.fail("重複網址不該再抓一次"))
+    subs = {"subs": [{"name": "既有", "url": URL, "seen": [], "last_count": 1}]}
+
+    text, changed = main.handle_command(AddSub(name="重複", url=URL), subs)
+
+    assert changed is False
+    assert len(subs["subs"]) == 1
+    assert "已經在監控中" in text
+
+
 def test_add_rejects_invalid_url(monkeypatch):
     def boom(url, pages=3):
         raise InvalidSearchURL("bad")
@@ -152,6 +163,60 @@ def test_webhook_returns_200_even_when_handling_an_event_raises(monkeypatch):
         headers={"X-Line-Signature": "ok"},
     )
     assert response.status_code == 200
+
+
+def test_webhook_saves_when_subscription_added(monkeypatch):
+    monkeypatch.setattr(main, "verify_signature", lambda body, sig: True)
+    monkeypatch.setattr(main, "load_subs", lambda: {"subs": []})
+    monkeypatch.setattr(main, "fetch", lambda url, pages=3: [])
+    monkeypatch.setattr(main, "reply", lambda token, text: None)
+    saved = []
+    monkeypatch.setattr(main, "save_subs", saved.append)
+
+    main.app.test_client().post(
+        "/webhook",
+        json={"events": [{"type": "message", "message": {"type": "text", "text": URL}, "replyToken": "t"}]},
+        headers={"X-Line-Signature": "ok"},
+    )
+    assert len(saved) == 1, "新增訂閱後必須寫回，否則使用者的設定會消失"
+
+
+def test_webhook_does_not_save_for_readonly_command(monkeypatch):
+    monkeypatch.setattr(main, "verify_signature", lambda body, sig: True)
+    monkeypatch.setattr(main, "load_subs", lambda: {"subs": []})
+    monkeypatch.setattr(main, "reply", lambda token, text: None)
+    monkeypatch.setattr(main, "save_subs", lambda subs: pytest.fail("唯讀指令不該寫回"))
+
+    response = main.app.test_client().post(
+        "/webhook",
+        json={"events": [{"type": "message", "message": {"type": "text", "text": "清單"}, "replyToken": "t"}]},
+        headers={"X-Line-Signature": "ok"},
+    )
+    assert response.status_code == 200
+
+
+def test_webhook_signature_wiring_end_to_end(monkeypatch):
+    # 不 mock verify_signature，用真實 HMAC 驗證路由與簽章之間的接線。
+    # 關鍵是簽章必須對「實際送出的那份 bytes」計算。
+    import base64
+    import hashlib
+    import hmac as hmac_mod
+
+    monkeypatch.setenv("LINE_CHANNEL_SECRET", "wiring-secret")
+    monkeypatch.setattr(main, "load_subs", lambda: {"subs": []})
+
+    body = b'{"events":[]}'
+    digest = hmac_mod.new(b"wiring-secret", body, hashlib.sha256).digest()
+    signature = base64.b64encode(digest).decode()
+
+    client = main.app.test_client()
+    ok = client.post("/webhook", data=body, content_type="application/json",
+                     headers={"X-Line-Signature": signature})
+    bad = client.post("/webhook", data=body, content_type="application/json",
+                      headers={"X-Line-Signature": "d3Jvbmc="})
+
+    assert ok.status_code == 200
+    assert bad.status_code == 400
 
 
 def test_add_reports_failure_when_fetch_raises_unexpectedly(monkeypatch):

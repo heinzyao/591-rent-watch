@@ -143,7 +143,7 @@ def _get(url: str) -> str:
     for attempt in range(2):
         try:
             response = _session.get(
-                url, headers={"User-Agent": USER_AGENT}, timeout=20
+                url, headers={"User-Agent": USER_AGENT}, timeout=8
             )
             response.raise_for_status()
             return response.text

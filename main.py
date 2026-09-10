@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 
 from flask import Flask, request
 
-from commands import AddSub, Command, DeleteSub, Help, ListSubs, parse_command
+from commands import AddSub, Command, DeleteSub, ListSubs, parse_command
 from notify import broadcast, broadcast_all, format_new_listings, reply, verify_signature
 from rent591 import PAGE_SIZE, InvalidSearchURL, diff, fetch
 from store import load_subs, save_subs
@@ -15,6 +16,12 @@ from store import load_subs, save_subs
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
+
+# 啟動時就檢查，讓設定錯誤出現在部署當下的終端機，而不是隔天早上的 log。
+# gunicorn 起不來 → revision 不 ready → 流量不會切過來，舊版繼續服務。
+for _var in ("GCS_BUCKET", "CRON_KEY", "LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN"):
+    if not os.environ.get(_var):
+        raise RuntimeError(f"缺少必要環境變數：{_var}")
 
 PAGES = int(os.environ.get("PAGES", "3"))
 PAGE_CAP = PAGES * PAGE_SIZE
@@ -34,6 +41,8 @@ def handle_command(command: Command, subs: dict) -> tuple[str, bool]:
     這個函式只操作傳入的 subs dict，不碰 GCS，因此可以完整測試。
     """
     if isinstance(command, AddSub):
+        if any(s["url"] == command.url for s in subs["subs"]):
+            return "這組條件已經在監控中，輸入「清單」可以查看。", False
         try:
             # ponytail: 同步抓取。新增訂閱時會同步抓 3 頁（約 2–3 秒）才回覆。LINE 對 webhook 回應時間沒有硬性 1 秒限制，逾時會重送。若開始出現重送，改成先 reply「處理中」再背景補抓。
             listings = fetch(command.url, pages=PAGES)
@@ -159,7 +168,7 @@ def cron() -> tuple[str, int]:
     # ponytail: 共享密鑰擋 /cron。Service 必須公開（LINE webhook 要打得到），
     # 所以無法靠 Cloud Run IAM 保護。若日後有多個排程來源，改用 Cloud Scheduler
     # OIDC + Google ID token 驗證。
-    if request.headers.get("X-Cron-Key") != os.environ["CRON_KEY"]:
+    if not hmac.compare_digest(request.headers.get("X-Cron-Key", ""), os.environ["CRON_KEY"]):
         return "forbidden", 403
 
     subs = load_subs()
