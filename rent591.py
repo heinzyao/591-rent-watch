@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import re
+import ssl
 import time
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup, Tag
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 
 
 @dataclass(frozen=True)
@@ -104,11 +107,38 @@ def normalize_url(search_url: str, page: int) -> str:
     return urlunparse(parts._replace(query=urlencode(query), fragment=""))
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """591 的憑證鏈不符 RFC 5280 嚴格要求：中間憑證 TWCA Secure SSL CA 缺少
+    Subject Key Identifier，Python 3.13+ / OpenSSL 3.5+ 預設的 VERIFY_X509_STRICT
+    會直接拒絕。這裡只關掉這一項格式檢查，信任鏈、主機名與有效期驗證全部保留。
+    """
+    context = create_urllib3_context()
+    context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    return context
+
+
+def _make_session() -> requests.Session:
+    """建立帶有放寬憑證格式檢查的 Session。"""
+    context = _ssl_context()
+
+    class _Adapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            kwargs["ssl_context"] = context
+            return super().init_poolmanager(*args, **kwargs)
+
+    session = requests.Session()
+    session.mount("https://", _Adapter())
+    return session
+
+
+_session = _make_session()
+
+
 def _get(url: str) -> str:
     """抓單一頁面，失敗時重試一次。"""
     for attempt in range(2):
         try:
-            response = requests.get(
+            response = _session.get(
                 url, headers={"User-Agent": USER_AGENT}, timeout=20
             )
             response.raise_for_status()

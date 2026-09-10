@@ -56,3 +56,16 @@ def test_diff_with_empty_seen_returns_all():
 def test_diff_preserves_order():
     listings = [make("9"), make("1"), make("5")]
     assert [x.id for x in diff(listings, set())] == ["9", "1", "5"]
+
+
+def test_ssl_context_keeps_verification_but_drops_strict_format_check():
+    # 591 的憑證鏈缺 Subject Key Identifier，必須關掉 VERIFY_X509_STRICT 才連得上，
+    # 但憑證驗證本身絕不能關掉——這個測試就是防止有人日後改成 verify=False
+    import ssl
+
+    from rent591 import _ssl_context
+
+    context = _ssl_context()
+    assert not (context.verify_flags & ssl.VERIFY_X509_STRICT)
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
