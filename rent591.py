@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ class Listing:
     url: str
 
 
-def _txt(el) -> str:
+def _txt(el: Tag | None) -> str:
     """取出元素的文字並壓縮空白。元素不存在時回空字串。"""
     if el is None:
         return ""
@@ -36,6 +36,10 @@ def parse(html: str) -> list[Listing]:
     for item in soup.select("div.item[data-id]"):
         link = item.select_one(".item-info-title a.link")
         if link is None:
+            continue
+
+        url = link.get("href")
+        if not url:
             continue
 
         # 房型／坪數／樓層在同一個 item-info-txt 裡，順序不保證且樓層可能缺，
@@ -62,7 +66,7 @@ def parse(html: str) -> list[Listing]:
                 floor=floor,
                 address=address,
                 metro=_txt(item.select_one(".item-info-txt:has(i.house-metro)")) or None,
-                url=link["href"],
+                url=url,
             )
         )
 

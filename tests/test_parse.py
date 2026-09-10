@@ -44,3 +44,13 @@ def test_required_fields_never_empty(listings):
 def test_parse_empty_page_returns_empty_list():
     # 頁數超界時 591 回傳沒有任何物件的頁面，必須回空清單而不是拋例外
     assert parse("<html><body><div class='empty'></div></body></html>") == []
+
+
+def test_parse_skips_listing_with_missing_href():
+    # 連結元素存在但缺 href 時，跳過該筆而不是讓整個 parse 拋例外
+    html = """
+    <div class="item" data-id="123">
+      <div class="item-info-title"><a class="link">沒有 href 的標題</a></div>
+    </div>
+    """
+    assert parse(html) == []
