@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import requests
 from bs4 import BeautifulSoup, Tag
 from requests.adapters import HTTPAdapter
-from urllib3.util.ssl_ import create_urllib3_context
+from urllib3.util import create_urllib3_context
 
 
 @dataclass(frozen=True)
@@ -98,7 +98,11 @@ def normalize_url(search_url: str, page: int) -> str:
     否則這個函式會變成任意網址的抓取代理（SSRF）。
     """
     parts = urlparse(search_url)
-    if parts.scheme not in ("http", "https") or parts.hostname != ALLOWED_HOST:
+    if (
+        parts.scheme not in ("http", "https")
+        or parts.hostname != ALLOWED_HOST
+        or not parts.path.startswith("/list")
+    ):
         raise InvalidSearchURL(f"只接受 https://{ALLOWED_HOST}/list 開頭的網址")
 
     query = [(k, v) for k, v in parse_qsl(parts.query) if k not in ("sort", "page")]
