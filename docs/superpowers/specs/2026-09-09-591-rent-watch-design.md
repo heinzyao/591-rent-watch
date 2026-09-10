@@ -119,16 +119,20 @@ I/O 隔離在 `store.py` 與 `main.py`。`rent591.py` 不 import Flask 也不 im
 class Listing:
     id: str
     title: str
-    price: str        # "25,000 元/月"
+    price: str        # "25,000"（「元/月」在 notify 格式化時才拼上）
     size: str         # "7坪"
     kind: str         # "獨立套房"
+    floor: str        # "3F/9F"、"頂樓加蓋/4F"
     address: str      # "中山區-林森北路"
-    metro: str | None # "距雙連 501公尺"
+    metro: str | None # "距雙連 501公尺"，非近捷運物件為 None
     url: str
 
-fetch(search_url: str, pages: int) -> list[str]
-    # 純 I/O。覆寫 sort=posttime_desc，逐頁附加 page=1..N。
-    # 抓取前先驗證網域為 rent.591.com.tw（見「安全性」）。
+normalize_url(search_url: str, page: int) -> str
+    # 驗證網域與路徑（見「安全性」）、強制 sort=posttime_desc、設定頁碼。
+    # 不符時拋 InvalidSearchURL。
+
+fetch(search_url: str, pages: int = 3) -> list[Listing]
+    # I/O。逐頁抓取後直接 parse 並依 id 去重，回傳合併後的物件清單。
 
 parse(html: str) -> list[Listing]
     # 純函式。以 BeautifulSoup(html, "lxml") 選取 div.item[data-id] 並抽欄位。

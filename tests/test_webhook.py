@@ -38,9 +38,10 @@ def test_add_records_name_url_and_seen(fake_fetch):
 
 
 def test_add_without_name_gets_numbered_default(fake_fetch):
+    # 第二筆刻意用不同網址：這個測試驗的是自動編號，不是重複網址的處理
     fake_fetch([make("1")])
     subs = {"subs": [{"name": "既有", "url": URL, "seen": [], "last_count": 0}]}
-    main.handle_command(AddSub(name="", url=URL), subs)
+    main.handle_command(AddSub(name="", url=f"{URL}&section=5"), subs)
     assert subs["subs"][1]["name"] == "條件 2"
 
 
