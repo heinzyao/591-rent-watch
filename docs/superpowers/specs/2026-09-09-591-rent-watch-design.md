@@ -83,17 +83,21 @@
 
 ```
 591-rent-watch/
-├── main.py                    # Flask app：webhook + cron 兩個 route
-├── rent591.py                 # fetch / parse / diff（純粹的 591 邏輯）
+├── main.py                    # Flask routes + handle_command / run_daily
+├── rent591.py                 # Listing / fetch / parse / diff
+├── commands.py                # parse_command
+├── store.py                   # GCS subs.json 讀寫
+├── notify.py                  # 簽章驗證 / 訊息格式化 / LINE 推播
 ├── Dockerfile
 ├── pyproject.toml
+├── scripts/deploy.sh
 ├── docs/sample-list.html      # 真實 HTML fixture（已保存）
-└── tests/
-    ├── test_parse.py          # parse / diff
-    └── test_command.py        # parse_command
+└── tests/                     # test_parse / test_fetch_diff / test_command
+                               # test_store / test_notify / test_webhook / test_cron
 ```
 
-兩個檔案。`rent591.py` 不 import Flask 也不 import LINE，可獨立測試。
+五個檔案，切分依據是**測試邊界**：純函式集中在 `rent591.py` / `commands.py` / `notify.py`，
+I/O 隔離在 `store.py` 與 `main.py`。`rent591.py` 不 import Flask 也不 import LINE。
 
 ## 元件與介面
 
@@ -130,8 +134,19 @@ parse_command(text: str) -> Command
 load_subs() -> dict  /  save_subs(subs: dict) -> None
     # GCS 單一 blob subs.json 的讀寫。
 
+verify_signature(body: bytes, signature: str | None) -> bool
+format_new_listings(groups: list[tuple[str, list[Listing]]]) -> list[str]
+    # 純函式。(訂閱名稱, 新物件) 轉成訊息，超過 4800 字元切多則且不切開單筆物件。
+
 reply(token: str, text: str) -> None       # LINE reply（回應對話用，免額度）
 broadcast(text: str) -> None               # LINE broadcast（定時通知用）
+broadcast_all(texts: list[str]) -> None    # 依序推播多則，任一則失敗即往外拋
+
+handle_command(command: Command, subs: dict) -> tuple[str, bool]
+    # 純邏輯（僅 fetch 為 I/O）。回傳 (回覆文字, subs 是否被改動)。
+
+run_daily(subs: dict) -> tuple[list[str], bool]
+    # 回傳 (要推播的訊息, 是否判定為解析失敗)。
 
 POST /webhook   # LINE 事件進入點
 POST /cron      # Cloud Scheduler 觸發
@@ -139,7 +154,8 @@ GET  /          # health check
 ```
 
 `fetch` / `load_subs` / `save_subs` / `reply` / `broadcast` 是 I/O 邊界；
-`parse` / `diff` / `parse_command` 是純函式，測試全部集中在這三個。
+`parse` / `diff` / `normalize_url` / `parse_command` / `format_new_listings` /
+`verify_signature` / `handle_command` / `run_daily` 是純邏輯，測試集中在這些。
 
 ## 資料模型
 
@@ -229,7 +245,7 @@ LINE 單則訊息上限 5000 字元，超過時自動切成多則發送。
 `tests/test_parse.py`，以 `docs/sample-list.html` 為 fixture：
 
 - `parse` 對 fixture 回傳 30 筆
-- 首筆各欄位值正確（id、租金、坪數、房型、地址、url）
+- 首筆各欄位值正確（id、租金、坪數、房型、樓層、地址、捷運、url）
 - 每筆的 `url` 皆符合 `https://rent.591.com.tw/<數字>`
 - `parse` 對空結果頁回傳 `[]` 而不拋例外
 - `diff` 在給定 seen 集合時正確排除已看過的 id
