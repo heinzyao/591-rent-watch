@@ -1,23 +1,25 @@
 # 591 租屋自動監控與 LINE 通知 — 設計文件
 
-日期：2026-09-09
+日期：2026-09-09（2026-09-10 修訂：設定改由 LINE 對話進行，支援多組搜尋條件）
 狀態：待實作
 
 ## 目標
 
-每天定時依指定搜尋條件抓取 591 租屋網，將**新上架**的物件資訊與連結透過 LINE 推播到手機。
+依多組使用者自訂的搜尋條件，每天定時抓取 591 租屋網，將**新上架**的物件資訊與連結透過 LINE 推播到手機。搜尋條件完全在 LINE 對話中管理，貼上 591 網址即可新增。
 
 ## 資料來源決策
 
-實測結論（2026-09-09 驗證）：
+實測結論（2026-09-09 / 09-10 驗證）：
 
 - `https://rent.591.com.tw/list?<query>` 是 **SSR 頁面**，HTML 內已含完整物件資料，每頁 30 筆
 - 每筆物件是一個 `<div class="item" data-id="{houseId}">`，內含標題、租金、坪數、房型、樓層、行政區、路名、捷運距離、出租者、更新時間、連結
 - `sort=posttime_desc` 可強制「最新上架」排序（已驗證 id 遞減）
-- `page=N` 分頁正常運作
+- `page=N` 分頁正常；超出範圍的頁數回傳 0 筆
+- **0 筆是合法結果**（條件過嚴或頁數超界），不可逕自視為解析失敗
 - 純 `GET` + 一般 User-Agent 即可，**不需要 cookie、CSRF token 或登入**
+- HTML 中**沒有**「符合共 N 筆」的總數欄位，總數由實際解析筆數推得
 
-因此採用 `requests` 抓 HTML + 解析，不使用 Playwright，也不逆向 `bff-house.591.com.tw` API。
+因此採用 `requests` 抓 HTML + `BeautifulSoup` 解析，不使用 Playwright，也不逆向 `bff-house.591.com.tw` API。
 
 被否決的方案：
 
@@ -26,38 +28,78 @@
 | Playwright | Cloud Run image 需塞 Chromium，體積與記憶體成本高，本案不需要執行 JS |
 | 逆向 BFF API | 路徑不在公開 bundle 中，需 device header／token，維護成本最高且易被封 |
 
-## 搜尋條件設定方式
+## 搜尋條件管理（LINE 對話）
 
-使用者在 591 網站上把條件（地區／租金／坪數／房型／捷運等）調到滿意，**直接複製網址**貼進 `config.toml`。
-
-程式對這個網址只做兩件事：
-1. 覆寫（或補上）`sort=posttime_desc`，確保最新物件在第一頁
-2. 逐頁附加 `page=1..N`
+使用者在 591 網站上把條件（地區／租金／坪數／房型／捷運等）調到滿意，**複製網址貼進 LINE 對話**。
 
 不維護任何縣市／鄉鎮代碼對照表 —— 591 自己的網址就是最完整的參數表達方式。
 
+### 指令解析規則
+
+`parse_command(text) -> Command` 是純函式，依序判斷：
+
+| 輸入 | 動作 |
+|---|---|
+| 訊息中含 `rent.591.com.tw/list` 網址 | 新增訂閱。網址以外的文字 strip 後作為名稱；若無文字則命名為「條件 N」 |
+| `清單` 或 `list` | 列出所有訂閱，含編號與上次抓取筆數 |
+| `刪除 N` 或 `del N` | 刪除第 N 組訂閱 |
+| 其他 | 回覆簡短使用說明 |
+
+只有三種操作，因此不使用 slash 指令語法、不做狀態機、不接 LLM 做語意分析。
+
+### 對話範例
+
+```
+你：中山區套房 https://rent.591.com.tw/list?region=1&section=5&...
+它：✅ 已新增「中山區套房」
+    目前符合 47 筆，已記錄為基準，明天起只推新上架的物件。
+
+你：清單
+它：目前 2 組條件
+    1. 中山區套房（47 筆）
+    2. 大安區電梯（12 筆）
+
+你：刪除 2
+它：🗑 已刪除「大安區電梯」
+```
+
+### 新增時的即時驗證
+
+新增訂閱時立即抓取一次，用途有三：
+
+1. 驗證網址有效、能正常解析
+2. 回報目前符合筆數，讓使用者當場知道條件是否太寬或太嚴
+3. 把現有物件全數寫入該組的 `seen`，避免隔天湧出一整批「新物件」
+
+若抓到 **0 筆**，仍然新增，但回覆提醒「目前 0 筆，條件可能過嚴或網址有誤」。
+若抓滿 `pages × 30` 筆（預設 90），回覆提醒「條件較寬，建議收緊」。
+
 ## 相依套件
 
-`requests`、`beautifulsoup4`、`lxml`、`google-cloud-storage`。皆為 `distiller` 已在使用的套件。
-設定檔以標準庫 `tomllib` 讀取（Python 3.11+），不另加 TOML 套件。
+`flask`、`gunicorn`、`requests`、`beautifulsoup4`、`lxml`、`google-cloud-storage`。
+皆為 `distiller` 已在使用的套件。不新增任何依賴。
 
 ## 專案結構
 
 ```
 591-rent-watch/
-├── main.py                    # fetch → parse → diff → notify
-├── config.toml                # 搜尋網址、頁數
+├── main.py                    # Flask app：webhook + cron 兩個 route
+├── rent591.py                 # fetch / parse / diff（純粹的 591 邏輯）
 ├── Dockerfile
 ├── pyproject.toml
 ├── docs/sample-list.html      # 真實 HTML fixture（已保存）
-└── tests/test_parse.py
+└── tests/
+    ├── test_parse.py          # parse / diff
+    └── test_command.py        # parse_command
 ```
 
-單一 `main.py`。不切 package、不做 service layer、不建 ORM。
+兩個檔案。`rent591.py` 不 import Flask 也不 import LINE，可獨立測試。
 
 ## 元件與介面
 
 ```python
+# ---- rent591.py：與 LINE、Flask 完全無關 ----
+
 @dataclass
 class Listing:
     id: str
@@ -70,7 +112,8 @@ class Listing:
     url: str
 
 fetch(search_url: str, pages: int) -> list[str]
-    # 純 I/O。回傳每頁的 HTML 字串。
+    # 純 I/O。覆寫 sort=posttime_desc，逐頁附加 page=1..N。
+    # 抓取前先驗證網域為 rent.591.com.tw（見「安全性」）。
 
 parse(html: str) -> list[Listing]
     # 純函式。以 BeautifulSoup(html, "lxml") 選取 div.item[data-id] 並抽欄位。
@@ -79,71 +122,107 @@ parse(html: str) -> list[Listing]
 diff(listings: list[Listing], seen: set[str]) -> list[Listing]
     # 純函式。回傳 id 不在 seen 中的物件。
 
-load_seen() -> set[str]  /  save_seen(ids: set[str]) -> None
-    # GCS 單一 blob seen.json 的讀寫。
+# ---- main.py ----
 
-notify(listings: list[Listing]) -> None
-    # LINE Messaging API broadcast。
+parse_command(text: str) -> Command
+    # 純函式。見「指令解析規則」。
 
-main() -> int
-    # 串接上述，回傳 exit code。
+load_subs() -> dict  /  save_subs(subs: dict) -> None
+    # GCS 單一 blob subs.json 的讀寫。
+
+reply(token: str, text: str) -> None       # LINE reply（回應對話用，免額度）
+broadcast(text: str) -> None               # LINE broadcast（定時通知用）
+
+POST /webhook   # LINE 事件進入點
+POST /cron      # Cloud Scheduler 觸發
+GET  /          # health check
 ```
 
-`fetch`／`notify`／`load_seen`／`save_seen` 是 I/O 邊界，`parse`／`diff` 是純函式可獨立測試。
+`fetch` / `load_subs` / `save_subs` / `reply` / `broadcast` 是 I/O 邊界；
+`parse` / `diff` / `parse_command` 是純函式，測試全部集中在這三個。
 
-## 資料流
+## 資料模型
 
-1. 讀 `config.toml` 取得 `search_url` 與 `pages`（預設 3，即 90 筆）
-2. `fetch` 抓取 N 頁 HTML
-3. `parse` 各頁並合併，依 id 去重
-4. `load_seen` 從 GCS 讀取已看過的 id 集合
-5. `diff` 得出新物件；**若無新物件則靜默結束**（不發訊息、不寫狀態）
-6. `notify` 發送 LINE broadcast
-7. 推播成功後才 `save_seen`
+GCS 單一 blob：`gs://$GCS_BUCKET/591-rent-watch/subs.json`
 
-## LINE 通知
+```json
+{
+  "subs": [
+    {
+      "name": "中山區套房",
+      "url": "https://rent.591.com.tw/list?region=1&section=5",
+      "seen": ["21901752", "21822928"],
+      "last_count": 47
+    }
+  ]
+}
+```
 
-- 新開一個專屬 Messaging API channel，**只做推播、不設 webhook**
-- 使用 **broadcast** 而非 push-to-userId：只有本人加該 channel 好友，broadcast 即等同推給自己，因此**不需要取得 userId**，省掉一整套 webhook 取得 userId 的流程
-- 純文字訊息，格式：
+`seen` **每組獨立**。兩組條件重疊到同一物件時會各推一次 —— 這是正確語意（你在兩組條件下都想看到它），且省掉跨組去重的邏輯。
+
+`seen` 每組保留最近 1000 筆 id，避免無限膨脹。
+
+一次讀、一次寫，無 schema、無 index、無查詢需求。不使用 Firestore —— 本案只需要一個清單，用不到文件資料庫的任何能力。
+
+## 每日執行流程（`POST /cron`）
+
+1. `load_subs()`
+2. 對每組訂閱：`fetch` → `parse` → `diff` → 收集新物件
+3. **失敗判斷**：若**所有**訂閱都回傳 0 筆，判定為 591 改版導致解析失敗 → 發告警、不更新任何 `seen`、回 500。
+   單組 0 筆屬正常（條件過嚴），照常處理。
+4. 有新物件才發一則 LINE broadcast，依條件名稱分段
+5. **broadcast 成功後**才 `save_subs()`
+
+### 通知訊息格式
 
 ```
 🏠 今日新物件 3 筆
 
+▍中山區套房
 25,000 元/月｜7坪｜獨立套房
 中山區-林森北路｜距雙連 501m
 https://rent.591.com.tw/21901752
 
+▍大安區電梯
 24,800 元/月｜10坪｜分租套房
 大安區-大安路一段｜距忠孝復興 235m
 https://rent.591.com.tw/21822928
 ```
 
-- LINE 單則訊息上限 5000 字元，超過時自動切成多則發送
+LINE 單則訊息上限 5000 字元，超過時自動切成多則發送。
+
+## 安全性
+
+以下為信任邊界，不簡化：
+
+1. **LINE webhook 簽章驗證**：以 channel secret 對 request body 做 HMAC-SHA256，與 `X-Line-Signature` 比對，不符直接回 400。
+2. **網址白名單**：`fetch` 只接受 host 為 `rent.591.com.tw` 的網址。使用者貼進來的網址是外部輸入，不做限制等於開放 SSRF。
+3. **`/cron` 端點保護**：驗證 `X-Cron-Key` header 與 Secret Manager 中的隨機字串相符，不符回 403。
+   Service 必須公開（LINE webhook 需要），故無法靠 Cloud Run IAM 保護整個服務。
+   `# ponytail: 共享密鑰擋 /cron，若日後有多個排程來源改用 Cloud Scheduler OIDC + ID token 驗證`
 
 ## 錯誤處理
 
-以下三點是刻意保留的複雜度，不得簡化：
-
-1. **解析結果為 0 筆 → 視為失敗**。不更新 `seen.json`、以同一個 LINE channel broadcast 一則告警（「591 解析失敗，可能已改版」）、`exit 1`。
-   若不擋這條，591 改版當天狀態會被清空，隔天會推播出整批重複物件。
-2. **LINE 推播失敗 → 不更新 `seen.json`**，讓下次執行重推，避免漏掉物件。
-3. **`seen.json` 只保留最近 1000 筆 id**，避免檔案無限膨脹。
-
-`fetch` 對單頁失敗採重試一次；若第一頁就失敗則整體失敗，後續頁失敗則以已取得的頁數繼續。
-
-## 狀態儲存
-
-GCS 單一 blob：`gs://$GCS_BUCKET/591-rent-watch/seen.json`（bucket 名由環境變數 `GCS_BUCKET` 提供，部署時設定），內容為 `{"ids": ["21901752", ...]}`。
-
-一次讀、一次寫，無 schema、無 index、無查詢需求。不使用 Firestore —— 本案只需要「一堆 id」，用不到文件資料庫的任何能力。
+1. **全部訂閱皆 0 筆 → 視為解析失敗**。不更新 `subs.json`、broadcast 一則告警（「591 解析失敗，可能已改版」）、回 500 讓 Scheduler 記錄失敗。
+2. **broadcast 失敗 → 不更新 `subs.json`**，讓下次執行重推，避免漏掉物件。
+3. **單組 fetch 失敗** → 該組跳過且不更新其 `seen`，其他組照常處理，訊息末尾附註哪組失敗。
+4. `fetch` 對單頁失敗重試一次；第一頁失敗即視為該組失敗，後續頁失敗則以已取得頁數繼續。
 
 ## 部署
 
-- **Cloud Run Job**（非 Service，本程式無需常駐監聽）
-- **Cloud Scheduler** 每天 09:00 (Asia/Taipei) 觸發
-- **Secret Manager** 存放 `LINE_CHANNEL_ACCESS_TOKEN`（沿用專屬 secret 命名慣例，如 `RENT591_LINE_CHANNEL_ACCESS_TOKEN`）
-- 流程與既有 `distiller` / `cat-lendar` 專案一致
+- **Cloud Run Service**（Flask + gunicorn），非 Job —— 需要常駐接收 LINE webhook
+- **Cloud Scheduler** 每天 09:00 (Asia/Taipei) 以 `X-Cron-Key` 打 `POST /cron`
+- **Secret Manager**：`RENT591_LINE_CHANNEL_SECRET`、`RENT591_LINE_CHANNEL_ACCESS_TOKEN`、`RENT591_CRON_KEY`
+- **環境變數**：`GCS_BUCKET`、`PAGES`（預設 3）
+- `min-instances=0`。cold start 期間 LINE 會重送 webhook，且 cron 不在意延遲。
+  `# ponytail: min-instances=0，若 webhook 常逾時再調成 1`
+- LINE Official Account 需關閉「自動回應訊息」，開啟 Webhook
+- 流程與既有 `distiller` 專案一致
+
+### webhook 同步處理的取捨
+
+新增訂閱時同步抓 3 頁（約 2–3 秒）後才回覆。LINE 對 webhook 回應時間沒有硬性 1 秒限制，逾時會重送，實務上此延遲可接受。
+`# ponytail: 同步抓取，若 LINE 開始重送再改成先 reply 再背景補抓`
 
 ## 測試
 
@@ -152,15 +231,25 @@ GCS 單一 blob：`gs://$GCS_BUCKET/591-rent-watch/seen.json`（bucket 名由環
 - `parse` 對 fixture 回傳 30 筆
 - 首筆各欄位值正確（id、租金、坪數、房型、地址、url）
 - 每筆的 `url` 皆符合 `https://rent.591.com.tw/<數字>`
+- `parse` 對空結果頁回傳 `[]` 而不拋例外
 - `diff` 在給定 seen 集合時正確排除已看過的 id
+
+`tests/test_command.py`：
+
+- 貼網址 + 名稱 → 正確拆出兩者
+- 貼純網址 → 名稱為「條件 N」
+- `清單` / `刪除 2` / 亂打 → 對應到正確的 Command
+- 非 591 網域的網址 → 被拒絕
 
 執行：`uv run python -m pytest tests/ -q`
 
-不寫 `fetch`／`notify` 的測試 —— 那是薄薄的 I/O 包裝，mock 掉之後測到的只是 mock 本身。
+不寫 `fetch` / `reply` / `broadcast` / GCS 的測試 —— 那是薄薄的 I/O 包裝，mock 掉之後測到的只是 mock 本身。
 
 ## 明確不做（YAGNI）
 
-- 不做降價追蹤（目前只要新物件；要加時在 `seen.json` 多存 price 欄位即可）
-- 不做互動式 LINE 指令設定條件（改條件就改 `config.toml` 重新部署）
-- 不做多組搜尋條件（需要時 `config.toml` 改成清單，迴圈跑）
+- 不做降價追蹤（目前只要新物件；要加時在 `seen` 改存 `{id: price}` 即可）
+- 不做多使用者（broadcast 推給所有好友，只有本人是好友。要多使用者時改用 push + userId，`subs.json` 加一層 user 維度）
+- 不做修改既有條件（刪掉重貼即可）
+- 不做 subs.json 的並發鎖（單人使用，webhook 與 cron 同時寫入的機率可忽略）
+  `# ponytail: 無鎖，若真的撞到改用 GCS if_generation_match 樂觀鎖`
 - 不存物件歷史、不做網頁介面、不做資料庫
