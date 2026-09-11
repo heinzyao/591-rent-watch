@@ -85,6 +85,19 @@ def test_add_rejects_when_at_capacity(monkeypatch):
     assert "上限" in text
 
 
+def test_add_allows_the_tenth_subscription(fake_fetch):
+    # 上限是 10 組，第 10 組必須加得進去（與 test_add_rejects_when_at_capacity 對稱，
+    # 少了這個，把判斷寫成 >= 9 也不會有測試喊）
+    fake_fetch([make("1")])
+    subs = {"subs": [{"name": f"條件 {i}", "url": f"{URL}&n={i}", "seen": [], "last_count": 0}
+                     for i in range(9)]}
+
+    text, changed = main.handle_command(AddSub(name="第10組", url=f"{URL}&n=99"), subs)
+
+    assert changed is True
+    assert len(subs["subs"]) == 10
+
+
 def test_add_rejects_invalid_url(monkeypatch):
     def boom(url, pages=3):
         raise InvalidSearchURL("bad")

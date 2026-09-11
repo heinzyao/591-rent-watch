@@ -98,8 +98,9 @@ def test_failed_group_is_skipped_and_others_continue(fetch_returns):
 
     assert failed is False
     assert "甲" in messages[0]
-    assert "乙" in messages[-1]                  # 訊息末尾附註哪組失敗
+    assert "乙" in messages[-1]                  # 獨立一則附註哪組失敗
     assert subs["subs"][1]["seen"] == ["old"]    # 失敗組不更新 seen
+    assert len(messages) == 2, "失敗附註必須獨立一則，不可接在已接近 4800 字元上限的訊息尾巴"
 
 
 # ---- HTTP 層 ----

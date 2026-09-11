@@ -3,7 +3,7 @@
 # 前置作業（只需做一次）：
 #   1. 建立 LINE Messaging API channel，取得 channel secret 與 access token
 #   2. gcloud services enable run.googleapis.com cloudscheduler.googleapis.com \
-#        secretmanager.googleapis.com storage.googleapis.com
+#        secretmanager.googleapis.com storage.googleapis.com compute.googleapis.com
 #   3. gcloud storage buckets create gs://$GCS_BUCKET --location=asia-east1
 #   4. 建立三個 secret（見下方 SECRETS 說明）
 set -euo pipefail
@@ -36,6 +36,7 @@ gcloud run deploy "$SERVICE" \
   --project "$PROJECT" \
   --region "$REGION" \
   --allow-unauthenticated \
+  --service-account "$SA" \
   --min-instances 0 \
   --memory 512Mi \
   --timeout 600 \
