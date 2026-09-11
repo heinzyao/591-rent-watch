@@ -110,6 +110,14 @@ def test_cron_rejects_wrong_key(monkeypatch):
     assert response.status_code == 403
 
 
+def test_cron_rejects_non_ascii_key(monkeypatch):
+    # hmac.compare_digest 對非 ASCII 的 str 會拋 TypeError，而這個 header
+    # 來自公開端點，任何人都能送。必須回 403 而不是 500。
+    monkeypatch.setenv("CRON_KEY", "secret")
+    response = main.app.test_client().post("/cron", headers={"X-Cron-Key": "café"})
+    assert response.status_code == 403
+
+
 def test_cron_rejects_missing_key(monkeypatch):
     monkeypatch.setenv("CRON_KEY", "secret")
     assert main.app.test_client().post("/cron").status_code == 403

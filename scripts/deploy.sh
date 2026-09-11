@@ -18,6 +18,19 @@ GCS_BUCKET="${GCS_BUCKET:?請設定 GCS_BUCKET}"
 #   printf '%s' "<access token>"   | gcloud secrets create RENT591_LINE_CHANNEL_ACCESS_TOKEN --data-file=-
 #   openssl rand -hex 32 | tr -d '\n' | gcloud secrets create RENT591_CRON_KEY --data-file=-
 
+# 先授權再部署：--set-secrets 的 secret 是在 instance 啟動時解析的，
+# runtime SA 沒有 secretAccessor 的話 revision 根本起不來，
+# 授權步驟若放在 deploy 之後就永遠執行不到。
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
+SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+
+gcloud storage buckets add-iam-policy-binding "gs://$GCS_BUCKET" \
+  --member="serviceAccount:$SA" --role=roles/storage.objectUser --project "$PROJECT"
+for SECRET in RENT591_LINE_CHANNEL_SECRET RENT591_LINE_CHANNEL_ACCESS_TOKEN RENT591_CRON_KEY; do
+  gcloud secrets add-iam-policy-binding "$SECRET" --member="serviceAccount:$SA" \
+    --role=roles/secretmanager.secretAccessor --project "$PROJECT"
+done
+
 gcloud run deploy "$SERVICE" \
   --source . \
   --project "$PROJECT" \
@@ -30,17 +43,6 @@ gcloud run deploy "$SERVICE" \
   --set-secrets "LINE_CHANNEL_SECRET=RENT591_LINE_CHANNEL_SECRET:latest,\
 LINE_CHANNEL_ACCESS_TOKEN=RENT591_LINE_CHANNEL_ACCESS_TOKEN:latest,\
 CRON_KEY=RENT591_CRON_KEY:latest"
-
-# 授權 runtime service account 讀寫 GCS 與讀取 secret。
-# 第一次部署會是「部署成功但沒權限 → 授權 → 下次請求正常」。
-SA=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" \
-     --format='value(spec.template.spec.serviceAccountName)')
-gcloud storage buckets add-iam-policy-binding "gs://$GCS_BUCKET" \
-  --member="serviceAccount:$SA" --role=roles/storage.objectUser --project "$PROJECT"
-for SECRET in RENT591_LINE_CHANNEL_SECRET RENT591_LINE_CHANNEL_ACCESS_TOKEN RENT591_CRON_KEY; do
-  gcloud secrets add-iam-policy-binding "$SECRET" --member="serviceAccount:$SA" \
-    --role=roles/secretmanager.secretAccessor --project "$PROJECT"
-done
 
 URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format='value(status.url)')
 CRON_KEY=$(gcloud secrets versions access latest --secret=RENT591_CRON_KEY --project "$PROJECT")

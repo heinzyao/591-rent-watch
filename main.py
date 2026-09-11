@@ -43,6 +43,10 @@ def handle_command(command: Command, subs: dict) -> tuple[str, bool]:
     if isinstance(command, AddSub):
         if any(s["url"] == command.url for s in subs["subs"]):
             return "這組條件已經在監控中，輸入「清單」可以查看。", False
+        # ponytail: 上限 10 組。/cron 序列跑完所有訂閱，超過這個數量會撞上
+        # Cloud Run 的請求逾時且失敗無聲。要支援更多就得改成並行抓取。
+        if len(subs["subs"]) >= 10:
+            return "條件數已達上限 10 組，請先刪除不需要的條件。", False
         try:
             # ponytail: 同步抓取。新增訂閱時會同步抓 3 頁（約 2–3 秒）才回覆。LINE 對 webhook 回應時間沒有硬性 1 秒限制，逾時會重送。若開始出現重送，改成先 reply「處理中」再背景補抓。
             listings = fetch(command.url, pages=PAGES)
@@ -154,11 +158,8 @@ def run_daily(subs: dict) -> tuple[list[str], bool]:
 
     messages = format_new_listings(groups)
     if errors:
-        note = f"⚠️ 以下條件本次抓取失敗，將於明日重試：{'、'.join(errors)}"
-        if messages:
-            messages[-1] += f"\n\n{note}"
-        else:
-            messages = [note]
+        # 獨立一則，不接在最後一則尾巴——那則可能已經接近 4800 字元的切割上限
+        messages.append(f"⚠️ 以下條件本次抓取失敗，將於明日重試：{'、'.join(errors)}")
 
     return messages, False
 
@@ -168,7 +169,10 @@ def cron() -> tuple[str, int]:
     # ponytail: 共享密鑰擋 /cron。Service 必須公開（LINE webhook 要打得到），
     # 所以無法靠 Cloud Run IAM 保護。若日後有多個排程來源，改用 Cloud Scheduler
     # OIDC + Google ID token 驗證。
-    if not hmac.compare_digest(request.headers.get("X-Cron-Key", ""), os.environ["CRON_KEY"]):
+    if not hmac.compare_digest(
+        request.headers.get("X-Cron-Key", "").encode("utf-8", "replace"),
+        os.environ["CRON_KEY"].encode(),
+    ):
         return "forbidden", 403
 
     subs = load_subs()

@@ -73,6 +73,18 @@ def test_add_rejects_duplicate_url(monkeypatch):
     assert "已經在監控中" in text
 
 
+def test_add_rejects_when_at_capacity(monkeypatch):
+    monkeypatch.setattr(main, "fetch", lambda url, pages=3: pytest.fail("已達上限不該再抓"))
+    subs = {"subs": [{"name": f"條件 {i}", "url": f"{URL}&n={i}", "seen": [], "last_count": 0}
+                     for i in range(10)]}
+
+    text, changed = main.handle_command(AddSub(name="第11組", url=f"{URL}&n=99"), subs)
+
+    assert changed is False
+    assert len(subs["subs"]) == 10
+    assert "上限" in text
+
+
 def test_add_rejects_invalid_url(monkeypatch):
     def boom(url, pages=3):
         raise InvalidSearchURL("bad")
