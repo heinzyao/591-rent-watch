@@ -46,7 +46,7 @@ def format_new_listings(groups: list[tuple[str, list[Listing]]]) -> list[str]:
         return []
 
     total = sum(len(items) for _, items in non_empty)
-    blocks = [f"🏠 今日新物件 {total} 筆"]
+    blocks = [f"🏠 新物件 {total} 筆"]
     for name, items in non_empty:
         blocks.append(f"▍{name}")
         blocks.extend(_format_listing(item) for item in items)
@@ -77,7 +77,9 @@ def _post(path: str, payload: dict) -> None:
         json=payload,
         timeout=15,
     )
-    response.raise_for_status()
+    # LINE 的 400 只看狀態碼查不出原因，body 才有 message 欄位
+    if not response.ok:
+        raise RuntimeError(f"LINE {path} {response.status_code}: {response.text[:300]}")
 
 
 def reply(reply_token: str, text: str) -> None:

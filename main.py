@@ -27,7 +27,7 @@ PAGES = int(os.environ.get("PAGES", "3"))
 PAGE_CAP = PAGES * PAGE_SIZE
 
 HELP_TEXT = (
-    "把 591 搜尋頁的網址貼給我就會開始監控，每天早上推播新上架的物件。\n\n"
+    "把 591 搜尋頁的網址貼給我就會開始監控，每天 9:00、13:00、21:00 推播新上架的物件。\n\n"
     "・新增：貼上網址，可在前面加名稱\n"
     "　例：中山區套房 https://rent.591.com.tw/list?region=1\n"
     "・查看：清單\n"
@@ -66,7 +66,7 @@ def handle_command(command: Command, subs: dict) -> tuple[str, bool]:
             "last_count": len(listings),
         })
 
-        text = f"✅ 已新增「{name}」\n目前符合 {len(listings)} 筆，已記錄為基準，明天起只推新上架的物件。"
+        text = f"✅ 已新增「{name}」\n目前符合 {len(listings)} 筆，已記錄為基準，之後只推新上架的物件。"
         if not listings:
             text = f"✅ 已新增「{name}」\n但目前符合 0 筆，條件可能過嚴或網址有誤。"
         elif len(listings) >= PAGE_CAP:
@@ -159,7 +159,7 @@ def run_daily(subs: dict) -> tuple[list[str], bool]:
     messages = format_new_listings(groups)
     if errors:
         # 獨立一則，不接在最後一則尾巴——那則可能已經接近 4800 字元的切割上限
-        messages.append(f"⚠️ 以下條件本次抓取失敗，將於明日重試：{'、'.join(errors)}")
+        messages.append(f"⚠️ 以下條件本次抓取失敗，將於下次重試：{'、'.join(errors)}")
 
     return messages, False
 

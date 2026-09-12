@@ -115,3 +115,8 @@ def test_name_whitespace_is_normalised():
     result = parse_command(f"大安區 {URL}, 備註")
     assert isinstance(result, AddSub)
     assert result.name == "大安區 備註"
+
+
+def test_list_accepts_surrounding_words_and_punctuation():
+    for text in ("清單", "查看清單", "清單？", "「清單」", "列表", "list", "LIST"):
+        assert isinstance(parse_command(text), ListSubs), text

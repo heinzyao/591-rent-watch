@@ -51,7 +51,7 @@ CRON_KEY=$(gcloud secrets versions access latest --secret=RENT591_CRON_KEY --pro
 gcloud scheduler jobs create http "${SERVICE}-daily" \
   --project "$PROJECT" \
   --location "$REGION" \
-  --schedule "0 9 * * *" \
+  --schedule "0 9,13,21 * * *" \
   --time-zone "Asia/Taipei" \
   --uri "$URL/cron" \
   --http-method POST \
@@ -61,11 +61,11 @@ gcloud scheduler jobs create http "${SERVICE}-daily" \
   2>/dev/null || gcloud scheduler jobs update http "${SERVICE}-daily" \
   --project "$PROJECT" \
   --location "$REGION" \
-  --schedule "0 9 * * *" \
+  --schedule "0 9,13,21 * * *" \
   --time-zone "Asia/Taipei" \
   --uri "$URL/cron" \
   --http-method POST \
-  --headers "X-Cron-Key=$CRON_KEY" \
+  --update-headers "X-Cron-Key=$CRON_KEY" \
   --attempt-deadline 600s \
   --max-retry-attempts 0
 

@@ -15,7 +15,8 @@ SEARCH_URL_RE = re.compile(r"https://rent\.591\.com\.tw/list\?[!-~]+")
 # 網址後緊接的標點不屬於網址本身。中文輸入常見「網址，名稱」不留空格的寫法。
 TRAILING_PUNCT = "，。！？、；：,.!?;:"
 DELETE_RE = re.compile(r"^(?:刪除|del)\s*(\d+)$", re.IGNORECASE)
-LIST_WORDS = {"清單", "列表", "list"}
+# 中文關鍵字用包含式比對，「list」必須完全相符——否則任何含 list 的網址都會中。
+LIST_WORDS_ZH = ("清單", "列表")
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,9 @@ def parse_command(text: str) -> Command:
             name = ""
         return AddSub(name=name, url=url)
 
-    if text.lower() in LIST_WORDS:
+    # ponytail: 「查看清單」「清單？」都該通，所以不要求完全相等。
+    plain = text.strip(TRAILING_PUNCT + " ？！「」").lower()
+    if plain == "list" or any(word in plain for word in LIST_WORDS_ZH):
         return ListSubs()
 
     delete = DELETE_RE.match(text)

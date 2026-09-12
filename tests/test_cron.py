@@ -43,7 +43,7 @@ def test_new_listings_are_collected_and_seen_updated(fetch_returns):
 
     assert failed is False
     assert len(messages) == 1
-    assert "今日新物件 2 筆" in messages[0]
+    assert "新物件 2 筆" in messages[0]
     assert subs["subs"][0]["seen"] == ["1", "2", "3"]
     assert subs["subs"][0]["last_count"] == 3
 
@@ -61,7 +61,7 @@ def test_seen_is_independent_per_subscription(fetch_returns):
     fetch_returns({"甲": [make("1")], "乙": [make("1")]})
     subs = {"subs": [sub("甲", []), sub("乙", [])]}
     messages, failed = main.run_daily(subs)
-    assert "今日新物件 2 筆" in messages[0]
+    assert "新物件 2 筆" in messages[0]
     assert subs["subs"][0]["seen"] == ["1"]
     assert subs["subs"][1]["seen"] == ["1"]
 

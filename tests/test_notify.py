@@ -53,7 +53,7 @@ def test_verify_signature_rejects_non_ascii_header(monkeypatch):
 def test_format_includes_total_count_and_group_name():
     messages = format_new_listings([("中山區套房", [make("1"), make("2")])])
     assert len(messages) == 1
-    assert "今日新物件 2 筆" in messages[0]
+    assert "新物件 2 筆" in messages[0]
     assert "▍中山區套房" in messages[0]
 
 
