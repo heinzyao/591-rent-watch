@@ -6,7 +6,7 @@
 
 ## English
 
-Scrapes [591.com.tw](https://rent.591.com.tw/) three times a day (09:00, 13:00, 21:00 Taipei time)
+Scrapes [591.com.tw](https://rent.591.com.tw/) twice a day (09:00, 21:00 Taipei time)
 using the search filters you set, and pushes **newly listed** rentals to LINE.
 
 ### Usage
@@ -51,7 +51,7 @@ Architecture: Cloud Run Service (Flask) + Cloud Scheduler + GCS (stores the watc
 
 ## 繁體中文
 
-每天 9:00、13:00、21:00（台北時間）依你設定的條件抓 591 租屋網，把**新上架**的物件推播到 LINE。
+每天 9:00、21:00（台北時間）依你設定的條件抓 591 租屋網，把**新上架**的物件推播到 LINE。
 
 ### 使用方式
 

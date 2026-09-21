@@ -27,7 +27,7 @@ PAGES = int(os.environ.get("PAGES", "3"))
 PAGE_CAP = PAGES * PAGE_SIZE
 
 HELP_TEXT = (
-    "把 591 搜尋頁的網址貼給我就會開始監控，每天 9:00、13:00、21:00 推播新上架的物件。\n\n"
+    "把 591 搜尋頁的網址貼給我就會開始監控，每天 9:00、21:00 推播新上架的物件。\n\n"
     "・新增：貼上網址，可在前面加名稱\n"
     "　例：中山區套房 https://rent.591.com.tw/list?region=1\n"
     "・查看：清單\n"
