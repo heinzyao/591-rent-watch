@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import re
 import ssl
-import time
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup, Tag
 from requests.adapters import HTTPAdapter
-from urllib3.util import create_urllib3_context
+from urllib3.util import Retry, create_urllib3_context
 
 
 @dataclass(frozen=True)
@@ -131,7 +130,9 @@ def _make_session() -> requests.Session:
             return super().init_poolmanager(*args, **kwargs)
 
     session = requests.Session()
-    session.mount("https://", _Adapter())
+    # 失敗重試一次（連線錯誤與 5xx）
+    retry = Retry(total=1, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+    session.mount("https://", _Adapter(max_retries=retry))
     return session
 
 
@@ -139,19 +140,10 @@ _session = _make_session()
 
 
 def _get(url: str) -> str:
-    """抓單一頁面，失敗時重試一次。"""
-    for attempt in range(2):
-        try:
-            response = _session.get(
-                url, headers={"User-Agent": USER_AGENT}, timeout=8
-            )
-            response.raise_for_status()
-            return response.text
-        except requests.RequestException:
-            if attempt == 1:
-                raise
-            time.sleep(1)
-    raise AssertionError("unreachable")
+    """抓單一頁面；重試由 session adapter 負責。"""
+    response = _session.get(url, headers={"User-Agent": USER_AGENT}, timeout=8)
+    response.raise_for_status()
+    return response.text
 
 
 def fetch(search_url: str, pages: int = 3) -> list[Listing]:

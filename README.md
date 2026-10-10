@@ -44,7 +44,6 @@ Architecture: Cloud Run Service (Flask) + Cloud Scheduler + GCS (stores the watc
 ### Design Docs
 
 - Design: `docs/superpowers/specs/2026-09-09-591-rent-watch-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-09-10-591-rent-watch.md`
 - Implementation log: `docs/superpowers/implementation-log.md` — review conclusions and the reasoning behind key decisions
 
 ---
@@ -87,5 +86,4 @@ PROJECT=<gcp-project> GCS_BUCKET=<bucket> ./scripts/deploy.sh
 ### 設計文件
 
 - 設計：`docs/superpowers/specs/2026-09-09-591-rent-watch-design.md`
-- 實作計畫：`docs/superpowers/plans/2026-09-10-591-rent-watch.md`
 - 實作紀錄：`docs/superpowers/implementation-log.md` — 審查結論與關鍵決策的來龍去脈
